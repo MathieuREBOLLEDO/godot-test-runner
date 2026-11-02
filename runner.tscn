@@ -1,0 +1,6 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://addons/test_runner/runner.gd" id="1_runner"]
+
+[node name="TestRunner" type="Node"]
+script = ExtResource("1_runner")
