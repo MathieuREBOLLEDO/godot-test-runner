@@ -65,7 +65,13 @@ Un test échoue aussi si :
 - il dépasse le délai (test bloqué, ou arrêté par une erreur de script).
 
 Après chaque test : nœuds du test libérés, pause levée, `Engine.time_scale`
-remis à 1.
+remis à 1, scène courante remplacée par une scène vide. Un test peut donc
+changer de scène (`change_scene_to_file`) : c'est cette scène vide qui est
+remplacée, pas le runner.
+
+En headless, les erreurs « Not supported by this display server » (fonctions
+qui demandent un écran ou un clavier, comme la disposition du clavier) sont
+ignorées et comptées dans le résumé.
 
 ## Entrées
 

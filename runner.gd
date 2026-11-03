@@ -17,6 +17,10 @@ const TESTS_DIR: String = "tests"
 const FILE_PREFIX: String = "test_"
 const METHOD_PREFIX: String = "test_"
 const DEFAULT_TIMEOUT: float = 30.0
+## Erreurs du serveur d'affichage headless (fonctions sans écran ni clavier,
+## par exemple la disposition du clavier) : ignorées en headless, comptées
+## dans le résumé.
+const HEADLESS_ONLY_ERRORS: PackedStringArray = ["Not supported by this display server"]
 const ErrorCatcher := preload("res://addons/test_runner/error_catcher.gd")
 
 var _dirs: PackedStringArray = ["res://"]
@@ -27,11 +31,13 @@ var _passed: int = 0
 var _failed: int = 0
 var _skipped: int = 0
 var _failed_names: PackedStringArray = []
+var _ignored_errors: int = 0
 
 
 func _ready() -> void:
 	# Le runner continue pendant une pause ; les fichiers de tests la suivent.
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	_reset_current_scene.call_deferred()
 	_read_args()
 	OS.add_logger(_catcher)
 	_run.call_deferred()
@@ -62,10 +68,27 @@ func _run() -> void:
 	var seconds: float = (Time.get_ticks_msec() - start) / 1000.0
 	print("")
 	print("== %d passed, %d failed, %d skipped in %.1f s" % [_passed, _failed, _skipped, seconds])
+	if _ignored_errors > 0:
+		print("   (%d headless-only error(s) ignored: %s)" % [_ignored_errors, ", ".join(HEADLESS_ONLY_ERRORS)])
 	for name: String in _failed_names:
 		print("   FAILED %s" % name)
 	OS.remove_logger(_catcher)
 	get_tree().quit(1 if _failed > 0 or files.is_empty() else 0)
+
+
+# Scène courante vide à la place du runner : un test qui change de scène
+# (change_scene_to_file) libère celle-ci et non le runner. Après chaque test,
+# la scène qu'il a ouverte est libérée.
+func _reset_current_scene() -> void:
+	var tree: SceneTree = get_tree()
+	if tree.current_scene != null and tree.current_scene != self and tree.current_scene.name == &"TestScene":
+		return
+	if tree.current_scene != null and tree.current_scene != self:
+		tree.current_scene.queue_free()
+	var scene: Node = Node.new()
+	scene.name = &"TestScene"
+	tree.root.add_child(scene)
+	tree.current_scene = scene
 
 
 # Fichiers test_*.gd dans un dossier tests/ (à n'importe quelle profondeur).
@@ -136,12 +159,16 @@ func _run_test(path: String, suite: TestCase, method_name: String) -> void:
 	suite._test_nodes.clear()
 	get_tree().paused = false
 	Engine.time_scale = 1.0
+	_reset_current_scene()
 	await get_tree().process_frame
 
 	var problems: PackedStringArray = suite.failures.duplicate()
 	if not finished:
 		problems.append("timed out after %.0f s (or stopped by a script error)" % _timeout)
 	for error: String in _catcher.take():
+		if _is_headless_only(error):
+			_ignored_errors += 1
+			continue
 		var expected: bool = false
 		for i: int in suite.expected_errors.size():
 			if error.contains(suite.expected_errors[i]):
@@ -154,6 +181,15 @@ func _run_test(path: String, suite: TestCase, method_name: String) -> void:
 		problems.append("expected error did not happen: %s" % missing)
 	var frames: int = Engine.get_physics_frames() - start_frame
 	_record(path, method_name, problems, suite.skip_reason, frames)
+
+
+func _is_headless_only(error: String) -> bool:
+	if DisplayServer.get_name() != "headless":
+		return false
+	for text: String in HEADLESS_ONLY_ERRORS:
+		if error.contains(text):
+			return true
+	return false
 
 
 # Lance step (qui peut attendre) et rend faux s'il ne finit pas avant le
